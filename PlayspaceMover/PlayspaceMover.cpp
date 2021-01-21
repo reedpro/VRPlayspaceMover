@@ -18,6 +18,7 @@
 #include <Windows.h>
 #endif
 
+#define BOOST_USE_WINDOWS_H
 #define PLAYSPACE_MOVER_VERSION "v0.1.7"
 
 static vr::IVRSystem* m_VRSystem;
@@ -219,7 +220,7 @@ bool checkAll(uint64_t button, uint64_t mask) {
     return ret;
 }
 
-void updateOffset(unsigned long long leftButtonMask, unsigned long long  rightButtonMask, unsigned long long resetButtonMask, unsigned long long  leftTogglePhysicsMask, unsigned long long  rightTogglePhysicsMask) {
+void updateOffset() {
     vr::VRControllerState_t leftButtons,rightButtons;
     leftButtons.ulButtonPressed = 0;
     rightButtons.ulButtonPressed = 0;
@@ -228,20 +229,22 @@ void updateOffset(unsigned long long leftButtonMask, unsigned long long  rightBu
     auto leftId = vr::VRSystem()->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
     if (leftId != vr::k_unTrackedDeviceIndexInvalid ) {
         vr::VRSystem()->GetControllerState(leftId, &leftButtons, sizeof(vr::VRControllerState_t));
-        if (leftButtons.ulButtonPressed & leftButtonMask ) {
-            delta += devicePos[leftId] - deviceLastPos[leftId];
-            count++;
-        }
+        //if (leftButtons.ulButtonPressed & leftButtonMask ) {
+        //    delta += devicePos[leftId] - deviceLastPos[leftId];
+        //    count++;
+        //}
     }
     auto rightId = vr::VRSystem()->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
     if (rightId != vr::k_unTrackedDeviceIndexInvalid ) {
         vr::VRSystem()->GetControllerState(rightId, &rightButtons, sizeof(vr::VRControllerState_t));
-        if (rightButtons.ulButtonPressed & rightButtonMask ) {
-            delta += devicePos[rightId] - deviceLastPos[rightId];
-            count++;
-        }
+        //if (rightButtons.ulButtonPressed & rightButtonMask ) {
+        //    delta += devicePos[rightId] - deviceLastPos[rightId];
+        //    count++;
+        //}
     }
 
+
+    //WHAT DOES COUNT DO? SEEMS TO SET CELOCITY FOR YEETS AND NORMALIZE MOVEMENT BETWEEN 2 CONTROLLERS. 
     if (count) {
         delta /= count;
 		velocity = glm::vec3(0);
@@ -253,14 +256,14 @@ void updateOffset(unsigned long long leftButtonMask, unsigned long long  rightBu
 		}
 		velocity += acceleration * deltaTime;
 	}
-	if (checkAll(leftButtons.ulButtonPressed, leftTogglePhysicsMask) || checkAll(rightButtons.ulButtonPressed, rightTogglePhysicsMask)) {
+	/*if (checkAll(leftButtons.ulButtonPressed, leftTogglePhysicsMask) || checkAll(rightButtons.ulButtonPressed, rightTogglePhysicsMask)) {
 		if (!physicsToggleChanged) {
 			physicsEnabled = !physicsEnabled;
 			physicsToggleChanged = true;
 		}
-	} else {
+	} else {*/
 		physicsToggleChanged = false;
-	}
+	//}
 	// Only apply physics if it's enabled.
 	if (physicsEnabled) {
 		delta += velocity * deltaTime;
@@ -269,14 +272,16 @@ void updateOffset(unsigned long long leftButtonMask, unsigned long long  rightBu
 	deltaMove = delta;
 
     lastOffset = offset;
-    if (checkAll(leftButtons.ulButtonPressed, resetButtonMask) && checkAll(rightButtons.ulButtonPressed, resetButtonMask)) {
+
+    //THIS IF CHECKS IF BUTTONS ARE PRESSED, THEN MOVES, OTHERWISE GOES TO DELTA. DELTA IS PHYSICS MOVEMENT, SO SKIP IF
+    //if (checkAll(leftButtons.ulButtonPressed, resetButtonMask) && checkAll(rightButtons.ulButtonPressed, resetButtonMask)) {
         offset = glm::mat4(1);
 		velocity = glm::vec3(0);
 		appliedImpulse = true;
-    } else {
+    /*} else {
         offset = glm::translate(offset, -delta);
-    }
-    //offset = glm::rotate(offset, 0.001f, glm::vec3(0, 1, 0));
+    }*/
+    //offset = glm::rotate(offset, 0.001f, glm::vec3(0, 1, 0)); //(THIS WAS ALWAYS COMMENTED OUT)
 }
 
 void collide() {
@@ -300,12 +305,13 @@ void collide() {
 }
 
 void move() {
-    for (uint32_t deviceIndex = 0; deviceIndex < vr::k_unMaxTrackedDeviceCount; deviceIndex++) {
-        if (!vr::VRSystem()->IsTrackedDeviceConnected(deviceIndex)) {
+    for (uint32_t deviceIndex = 0; deviceIndex < vr::k_unMaxTrackedDeviceCount; deviceIndex++) { //loops for all tracked devices
+        if (!vr::VRSystem()->IsTrackedDeviceConnected(deviceIndex)) { //skips if not connected
             continue;
         }
         glm::vec3 oldpos = (glm::inverse(lastOffset)*glm::vec4(devicePos[deviceIndex], 1.f)).xyz();
-        glm::vec3 newpos = (offset * glm::vec4(oldpos, 1.f)).xyz();
+        offset = glm::translate(offset, glm::vec3(1,0,0)); //change x offset by one each call
+        glm::vec3 newpos = (offset * glm::vec4(oldpos, 1.f)).xyz();// for each device multiply position by multiplier 
         devicePos[deviceIndex] = newpos;
         glm::vec3 delta = deviceBaseOffsets[deviceIndex];
         // Virtual devices need to be moved half as much, don't ask me why
@@ -509,44 +515,44 @@ BOOL WINAPI ConsoleHandler(DWORD CEvent) {
 #endif
 
 int app( int argc, const char** argv ) {
-    cxxopts::Options options("PlayspaceMover", "Lets you grab your playspace and move it.");
-    options.add_options()
-        ("h,help", "Prints help.")
-        ("v,version", "Prints version.")
-        ("l,leftButtonMask", "Specifies the buttons that trigger the playspace grab.", cxxopts::value<unsigned long long >()->default_value("130"))
-        ("r,rightButtonMask", "Specifies the buttons that trigger the playspace grab.", cxxopts::value<unsigned long long >()->default_value("130"))
-        ("leftTogglePhysicsMask", "Specifies the buttons that toggle physics.", cxxopts::value<unsigned long long >()->default_value("0"))
-        ("rightTogglePhysicsMask", "Specifies the buttons that toggle physics.", cxxopts::value<unsigned long long >()->default_value("0"))
-        ("resetButtonMask", "Specifies the buttons that trigger a playspace reset.", cxxopts::value<unsigned long long >()->default_value("0"))
-        ("g,gravity", "Sets how intense gravity is in meters.", cxxopts::value<float>()->default_value("9.81"))
-        ("f,friction", "Sets how much friction the ground applies. (Try values from 0 to 10.)", cxxopts::value<float>()->default_value("8"))
-        ("airFriction", "Sets how much friction the air applies. (Try values from 0 to 10.)", cxxopts::value<float>()->default_value("0"))
-        ("noGround", "Disables the ground, only useful if physics is enabled.")
-        ("j,jumpMultiplier", "Sets how hard you can throw yourself. (Try values from 0 to 100.)", cxxopts::value<float>()->default_value("80"))
-        ("p,physics", "Enables physics with the default settings.")
-        ("fakeTrackers", "Enables a bunch of fake devices that act like full body tracking.")
-        ("bodyHeight", "Sets the distance between the head and feet, in meters.", cxxopts::value<float>()->default_value("2"))
-		("orbitTracker", "Fake Trackers move relative to HMD rotation.")
-		("positional", "Positional parameters", cxxopts::value<std::vector<std::string>>())
-        ;
+ //   cxxopts::Options options("PlayspaceMover", "Lets you grab your playspace and move it.");
+ //   options.add_options()
+ //       ("h,help", "Prints help.")
+ //       ("v,version", "Prints version.")
+ //       ("l,leftButtonMask", "Specifies the buttons that trigger the playspace grab.", cxxopts::value<unsigned long long >()->default_value("130"))
+ //       ("r,rightButtonMask", "Specifies the buttons that trigger the playspace grab.", cxxopts::value<unsigned long long >()->default_value("130"))
+ //       ("leftTogglePhysicsMask", "Specifies the buttons that toggle physics.", cxxopts::value<unsigned long long >()->default_value("0"))
+ //       ("rightTogglePhysicsMask", "Specifies the buttons that toggle physics.", cxxopts::value<unsigned long long >()->default_value("0"))
+ //       ("resetButtonMask", "Specifies the buttons that trigger a playspace reset.", cxxopts::value<unsigned long long >()->default_value("0"))
+ //       ("g,gravity", "Sets how intense gravity is in meters.", cxxopts::value<float>()->default_value("9.81"))
+ //       ("f,friction", "Sets how much friction the ground applies. (Try values from 0 to 10.)", cxxopts::value<float>()->default_value("8"))
+ //       ("airFriction", "Sets how much friction the air applies. (Try values from 0 to 10.)", cxxopts::value<float>()->default_value("0"))
+ //       ("noGround", "Disables the ground, only useful if physics is enabled.")
+ //       ("j,jumpMultiplier", "Sets how hard you can throw yourself. (Try values from 0 to 100.)", cxxopts::value<float>()->default_value("80"))
+ //       ("p,physics", "Enables physics with the default settings.")
+ //       ("fakeTrackers", "Enables a bunch of fake devices that act like full body tracking.")
+ //       ("bodyHeight", "Sets the distance between the head and feet, in meters.", cxxopts::value<float>()->default_value("2"))
+	//	("orbitTracker", "Fake Trackers move relative to HMD rotation.")
+	//	("positional", "Positional parameters", cxxopts::value<std::vector<std::string>>())
+ //       ;
 
-	options.parse_positional("positional");
-    auto result = options.parse(argc, argv);
+	//options.parse_positional("positional");
+ //   auto result = options.parse(argc, argv);
 
-	// We don't support any positional arguments, so consider any positional arguments as a malformed command.
-	if ( result.count("positional") > 0 ) {
-		auto& positional = result["positional"].as<std::vector<std::string>>();
-		throw cxxopts::OptionException("Unknown positional parameter `" + positional[0] + "` supplied.");
-	}
-	
-    if (result["help"].as<bool>()) {
-        Help();
-        return 0;
-    }
-    if (result["version"].as<bool>()) {
-        std::cout << PLAYSPACE_MOVER_VERSION << "\n";
-        return 0;
-    }
+	//// We don't support any positional arguments, so consider any positional arguments as a malformed command.
+	//if ( result.count("positional") > 0 ) {
+	//	auto& positional = result["positional"].as<std::vector<std::string>>();
+	//	throw cxxopts::OptionException("Unknown positional parameter `" + positional[0] + "` supplied.");
+	//}
+	//
+ //   if (result["help"].as<bool>()) {
+ //       Help();
+ //       return 0;
+ //   }
+ //   if (result["version"].as<bool>()) {
+ //       std::cout << PLAYSPACE_MOVER_VERSION << "\n";
+ //       return 0;
+ //   }
 
     // Initialize stuff
     vr::EVRInitError error = vr::VRInitError_Compositor_Failed;
@@ -574,31 +580,31 @@ int app( int argc, const char** argv ) {
     }
     std::cout << "Success!\n";
 
-	acceleration = glm::vec3(0, result["gravity"].as<float>(), 0);
-	velocity = glm::vec3(0);
-	jumpMultiplier = result["jumpMultiplier"].as<float>();
-	airFriction = result["airFriction"].as<float>();
-	friction = result["friction"].as<float>();
-	ground = !result["noGround"].as<bool>();
-	bodyHeight = result["bodyHeight"].as<float>();
-	orbitTracker = result["orbitTracker"].as<bool>(); 
-	fakeTrackers = result["fakeTrackers"].as<bool>() || orbitTracker || result.count("bodyHeight");
-	if (fakeTrackers && !findTrackers()) {
-		hipID = createTracker();
-		leftFootID = createTracker();
-		rightFootID = createTracker();
-	}
+	//acceleration = glm::vec3(0, result["gravity"].as<float>(), 0);
+	//velocity = glm::vec3(0);
+	//jumpMultiplier = result["jumpMultiplier"].as<float>();
+	//airFriction = result["airFriction"].as<float>();
+	//friction = result["friction"].as<float>();
+	//ground = !result["noGround"].as<bool>();
+	//bodyHeight = result["bodyHeight"].as<float>();
+	//orbitTracker = result["orbitTracker"].as<bool>(); 
+	//fakeTrackers = result["fakeTrackers"].as<bool>() || orbitTracker || result.count("bodyHeight");
+	//if (fakeTrackers && !findTrackers()) {
+	//	hipID = createTracker();
+	//	leftFootID = createTracker();
+	//	rightFootID = createTracker();
+	//}
 	// Only enable physics if they specify one of the variables...
-	physicsEnabled = (result.count("jumpMultiplier") || result.count("airFriction") || result.count("friction") || result.count("noGround") || result.count("gravity") || result["physics"].as<bool>());
+	//physicsEnabled = (result.count("jumpMultiplier") || result.count("airFriction") || result.count("friction") || result.count("noGround") || result.count("gravity") || result["physics"].as<bool>());
     offset = glm::mat4x4(1);
     lastOffset = offset;
 
-	unsigned long long  leftButtonMask = result["leftButtonMask"].as<unsigned long long >();
-	unsigned long long  rightButtonMask = result["rightButtonMask"].as<unsigned long long >();
-	unsigned long long  resetButtonMask = result["resetButtonMask"].as<unsigned long long >();
+	//unsigned long long  leftButtonMask = result["leftButtonMask"].as<unsigned long long >();
+	//unsigned long long  rightButtonMask = result["rightButtonMask"].as<unsigned long long >();
+	//unsigned long long  resetButtonMask = result["resetButtonMask"].as<unsigned long long >();
 
-	unsigned long long  rightTogglePhysicsButtonMask = result["rightTogglePhysicsMask"].as<unsigned long long >();
-	unsigned long long  leftTogglePhysicsButtonMask = result["leftTogglePhysicsMask"].as<unsigned long long >();
+	//unsigned long long  rightTogglePhysicsButtonMask = result["rightTogglePhysicsMask"].as<unsigned long long >();
+	// long long  leftTogglePhysicsButtonMask = result["leftTogglePhysicsMask"].as<unsigned long long >();
 
     updateBaseOffsets();
 	#ifdef _WIN32
@@ -630,7 +636,7 @@ int app( int argc, const char** argv ) {
 
                 updateVirtualDevices();
                 updatePositions();
-                updateOffset(leftButtonMask, rightButtonMask, resetButtonMask, leftTogglePhysicsButtonMask, rightTogglePhysicsButtonMask);
+                updateOffset();
 				updateFakeTrackers();
 				collide();
                 move();
